@@ -2,6 +2,7 @@ require 'rubygems'
 
 require 'workflow/specification'
 require 'workflow/adapters/active_record'
+require 'workflow/adapters/neo4j'
 require 'workflow/adapters/remodel'
 
 # See also README.markdown for documentation
@@ -270,8 +271,11 @@ module Workflow
       if Object.const_defined?(:ActiveRecord) && klass < ActiveRecord::Base
         klass.send :include, Adapter::ActiveRecord
       end
-      if Object.const_defined?(:Remodel) && klass < Adapter::Remodel::Entity
-        klass.send :include, Adapter::Remodel::InstanceMethods
+      if Object.const_defined?(:ActiveRecord) && klass < ActiveRecord::Base
+        klass.send :include, Adapter::ActiveRecord
+      end
+      if klass.ancestors.select { |o| o.class == Neo4j::ActiveNode }.size > 0
+        klass.send :include, Adapter::Neo4j
       end
     end
   end
