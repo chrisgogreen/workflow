@@ -1,5 +1,8 @@
-[![Build Status](https://travis-ci.org/geekq/workflow.png?branch=master)](https://travis-ci.org/geekq/workflow)
+[![Build Status](https://travis-ci.org/geekq/workflow.png?branch=master)](https://travis-ci.org/geekq/workflow) Tested with [different Ruby and Rails versions](https://travis-ci.org/geekq/workflow)
 
+Note: you can find documentation for specific workflow rubygem versions at
+http://rubygems.org/gems/workflow : select a version (optional, default
+is latest release), click "Documentation" link.
 
 What is workflow?
 -----------------
@@ -79,7 +82,7 @@ after another state (by the order they were defined):
     => true
     article.current_state >= :accepted
     => false
-    article.between? :awaiting_review, :rejected
+    article.current_state.between? :awaiting_review, :rejected
     => true
 
 Now we can call the submit event, which transitions to the
@@ -147,9 +150,10 @@ be:
       end
     end
 
-`article.review!; article.reject!` will cause a state transition, persist the new state
-(if integrated with ActiveRecord) and invoke this user defined reject
-method.
+`article.review!; article.reject!` will cause state transition to
+`being_reviewed` state, persist the new state (if integrated with
+ActiveRecord), invoke this user defined `reject` method and finally
+persist the `rejected` state.
 
 Note: on successful transition from one state to another the workflow
 gem immediately persists the new workflow state with `update_column()`,
@@ -300,11 +304,87 @@ couchrest library.
 Please also have a look at
 [the full source code](http://github.com/geekq/workflow/blob/master/test/couchtiny_example.rb).
 
-Integration with Mongoid
-------------------------
 
-You can integrate with Mongoid following the example above for CouchDB, but there is a gem that does that for you (and includes extensive tests):
-[workflow_on_mongoid](http://github.com/bowsersenior/workflow_on_mongoid)
+Adapters to support other databases
+-----------------------------------
+
+I get a lot of requests to integrate persistence support for different
+databases, object-relational adapters, column stores, document
+databases.
+
+To enable highest possible quality, avoid too many dependencies and to
+avoid unneeded maintenance burden on the `workflow` core it is best to
+implement such support as a separate gem.
+
+Only support for the ActiveRecord will remain for the foreseeable
+future. So Rails beginners can expect `workflow` to work with Rails out
+of the box. Other already included adapters stay for a while but should
+be extracted to separate gems.
+
+If you want to implement support for your favorite ORM mapper or your
+favorite NoSQL database, you just need to implement a module which
+overrides the persistence methods `load_workflow_state` and
+`persist_workflow_state`. Example:
+
+    module Workflow
+      module SuperCoolDb
+        module InstanceMethods
+          def load_workflow_state
+            # Load and return the workflow_state from some storage.
+            # You can use self.class.workflow_column configuration.
+          end
+
+          def persist_workflow_state(new_value)
+            # save the new_value workflow state
+          end
+        end
+
+        module ClassMethods
+          # class methods of your adapter go here
+        end
+
+        def self.included(klass)
+          klass.send :include, InstanceMethods
+          klass.extend ClassMethods
+        end
+      end
+    end
+
+The user of the adapter can use it then as:
+
+    class Article
+      include Workflow
+      include Workflow:SuperCoolDb
+      workflow do
+        state :submitted
+        # ...
+      end
+    end
+
+I can then link to your implementation from this README. Please let me
+also know, if you need any interface beyond `load_workflow_state` and
+`persist_workflow_state` methods to implement an adapter for your
+favorite database.
+
+
+Custom Versions of Existing Adapters
+------------------------------------
+
+Other adapters (such as a custom ActiveRecord plugin) can be selected by adding a `workflow_adapter` class method, eg.
+
+```ruby
+class Example < ActiveRecord::Base
+  def self.workflow_adapter
+    MyCustomAdapter
+  end
+  include Workflow
+
+  # ...
+end
+```
+
+(The above will include `MyCustomAdapter` *instead* of `Workflow::Adapter::ActiveRecord`.)
+
 
 Accessing your workflow specification
 -------------------------------------
@@ -339,6 +419,31 @@ state and every event:
 
 The workflow library itself uses this feature to tweak the graphical
 representation of the workflow. See below.
+
+
+Conditional event transitions
+-----------------------------
+
+Conditions can be a "method name symbol" with a corresponding instance method, a `proc` or `lambda` which are added to events, like so:
+
+    state :off
+      event :turn_on, :transition_to => :on,
+                      :if => :sufficient_battery_level?
+
+      event :turn_on, :transition_to => :low_battery,
+                      :if => proc { |device| device.battery_level > 0 }
+    end
+
+    # corresponding instance method
+    def sufficient_battery_level?
+      battery_level > 10
+    end
+
+When calling a `device.can_<fire_event>?` check, or attempting a `device.<event>!`, each event is checked in turn:
+
+* With no `:if` check, proceed as usual.
+* If an `:if` check is present, proceed if it evaluates to true, or drop to the next event.
+* If you've run out of events to check (eg. `battery_level == 0`), then the transition isn't possible.
 
 
 Advanced transition hooks
@@ -541,9 +646,27 @@ when using both a block and a callback method for an event, the block executes p
 Changelog
 ---------
 
+### New in the upcoming version 1.3.0
+
+* Retiring Ruby 1.8.7 and Rails 2 support #118. If you still need this older
+  versions despite security issues and missing updates, you can use
+  workflow 1.2.0 or older. In your Gemfile put
+
+      gem 'workflow', '~> 1.2.0'
+
+  or when using github source just reference the v1.2.0 tag.
+* improved callback method handling: #113 and #125
+
 ### New in the version 1.2.0
 
 * Fix issue #98 protected on\_\* callbacks in Ruby 2
+* #106 Inherit exceptions from StandardError instead of Exception
+* #109 Conditional event transitions, contributed by [damncabbage](http://robhoward.id.au/)
+  Please note: this introduces incompatible changes to the meta data API, see also #131.
+* New policy for supporting other databases - extract to separate
+  gems. See the README section above.
+* #111 Custom Versions of Existing Adapters by [damncabbage](http://robhoward.id.au/)
+
 
 ### New in the version 1.1.0
 
@@ -655,7 +778,9 @@ Support
 About
 -----
 
-Author: Vladimir Dobriakov, <http://www.innoq.com/blog/vd>, <http://blog.geekq.net/>
+Author: Vladimir Dobriakov, <http://www.mobile-web-consulting.de>, <http://blog.geekq.net/>
+
+Copyright (c) 2010-2014 Vladimir Dobriakov, www.mobile-web-consulting.de
 
 Copyright (c) 2008-2009 Vodafone
 

@@ -1,6 +1,12 @@
 module Workflow
   module Adapter
     module ActiveRecord
+      def self.included(klass)
+        klass.send :include, Adapter::ActiveRecord::InstanceMethods
+        klass.send :extend, Adapter::ActiveRecord::Scopes
+        klass.before_validation :write_initial_state
+      end
+
       module InstanceMethods
         def load_workflow_state
           read_attribute(self.class.workflow_column)
@@ -9,13 +15,8 @@ module Workflow
         # On transition the new workflow state is immediately saved in the
         # database.
         def persist_workflow_state(new_value)
-          if self.respond_to? :update_column
-            # Rails 3.1 or newer
-            update_column self.class.workflow_column, new_value
-          else
-            # older Rails; beware of side effect: other (pending) attribute changes will be persisted too
-            update_attribute self.class.workflow_column, new_value
-          end
+          # Rails 3.1 or newer
+          update_column self.class.workflow_column, new_value
         end
 
         private
@@ -49,13 +50,10 @@ module Workflow
 
         def workflow_with_scopes(&specification)
           workflow_without_scopes(&specification)
-          states     = workflow_spec.states.values
-          eigenclass = class << self; self; end
+          states = workflow_spec.states.values
 
           states.each do |state|
-            # Use eigenclass instead of `define_singleton_method`
-            # to be compatible with Ruby 1.8+
-            eigenclass.send(:define_method, "with_#{state}_state") do
+            define_singleton_method("with_#{state}_state") do
               where("#{table_name}.#{self.workflow_column.to_sym} = ?", state.to_s)
             end
           end

@@ -1,7 +1,7 @@
 begin
   require 'rubygems'
 
-  gem 'ruby-graphviz', '>=1.0'
+  gem 'ruby-graphviz', '~> 1.0.0'
   gem 'activesupport'
 
   require 'graphviz'
@@ -57,7 +57,7 @@ module Workflow
         node = state.draw(graph)
         node.fontname = options[:font]
 
-        state.events.each do |_, event|
+        state.events.flat.each do |event|
           edge = event.draw(graph, state)
           edge.fontname = options[:font]
         end

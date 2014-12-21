@@ -38,7 +38,7 @@ module Workflow
             undef_method "#{state_name}?"
           end
 
-          state.events.values.each do |event|
+          state.events.flat.each do |event|
             event_name = event.name
             module_eval do
               undef_method "#{event_name}!".to_sym
@@ -57,7 +57,7 @@ module Workflow
           end
         end
 
-        state.events.values.each do |event|
+        state.events.flat.each do |event|
           event_name = event.name
           module_eval do
             define_method "#{event_name}!".to_sym do |*args|
@@ -65,7 +65,7 @@ module Workflow
             end
 
             define_method "can_#{event_name}?" do
-              return self.current_state.events.include?(event_name)
+              return !!current_state.events.first_applicable(event_name, self)
             end
           end
         end
@@ -94,7 +94,7 @@ module Workflow
     end
 
     def process_event!(name, *args)
-      event = current_state.events[name.to_sym]
+      event = current_state.events.first_applicable(name, self)
       raise NoTransitionAllowed.new(
         "There is no event #{name.to_sym} defined for the #{current_state} state") \
         if event.nil?
@@ -111,7 +111,7 @@ module Workflow
 
       begin
         return_value = run_action(event.action, *args) || run_action_callback(event.name, *args)
-      rescue Exception => e
+      rescue StandardError => e
         run_on_error(e, from, to, name, *args)
       end
 
@@ -199,6 +199,7 @@ module Workflow
       # 1. public callback method or
       # 2. protected method somewhere in the class hierarchy or
       # 3. private in the immediate class (parent classes ignored)
+      action = action.to_sym
       self.respond_to?(action) or
         self.class.protected_method_defined?(action) or
         self.private_methods(false).map(&:to_sym).include?(action)
@@ -262,15 +263,15 @@ module Workflow
 
     klass.extend ClassMethods
 
-    if Object.const_defined?(:ActiveRecord)
-      if klass < ActiveRecord::Base
-        klass.send :include, Adapter::ActiveRecord::InstanceMethods
-        klass.send :extend, Adapter::ActiveRecord::Scopes
-        klass.before_validation :write_initial_state
+    # Look for a hook; otherwise detect based on ancestor class.
+    if klass.respond_to?(:workflow_adapter)
+      klass.send :include, klass.workflow_adapter
+    else
+      if Object.const_defined?(:ActiveRecord) && klass < ActiveRecord::Base
+        klass.send :include, Adapter::ActiveRecord
       end
-    elsif Object.const_defined?(:Remodel)
-      if klass < Adapter::Remodel::Entity
-        klass.send :include, Remodel::InstanceMethods
+      if Object.const_defined?(:Remodel) && klass < Adapter::Remodel::Entity
+        klass.send :include, Adapter::Remodel::InstanceMethods
       end
     end
   end
